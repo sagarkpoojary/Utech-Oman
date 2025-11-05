@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTECH Oman - Hotel Security E-Commerce Prototype</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Define a custom color scheme based on the request (Teal/Neutral) */
+        :root {
+            --color-primary: #0D9488; /* Tailwind teal-600 */
+            --color-primary-dark: #0F766E; /* Tailwind teal-700 */
+            --color-accent: #3b82f6; /* Tailwind blue-500 for secondary action */
+        }
+        .text-primary { color: var(--color-primary); }
+        .bg-primary { background-color: var(--color-primary); }
+        .bg-primary-dark:hover { background-color: var(--color-primary-dark); }
+
+        /* Custom scrollbar for category chips */
+        .category-chips::-webkit-scrollbar {
+            display: none;
+        }
+        .category-chips {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+        
+        /* Inter font for a professional look */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f7;
+            min-height: 100vh;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#0D9488',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="antialiased">
+
+    <!-- Main Application Container -->
+    <div id="app-container" class="min-h-screen flex flex-col">
+        <!-- Header will be rendered here -->
+    </div>
+
+    <!-- Modals and Toasts (fixed positioning) -->
+    <div id="lead-form-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50"></div>
+    <div id="otp-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50"></div>
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+    <div id="chatbot-icon" class="fixed bottom-4 left-4 bg-primary text-white p-3 rounded-full shadow-lg cursor-pointer z-40 hover:scale-105 transition duration-200">
+        <i data-lucide="message-square-text"></i>
+    </div>
+    <div id="chatbot-popup" class="fixed bottom-20 left-4 w-72 bg-white rounded-xl shadow-2xl p-4 hidden z-40 border border-primary/20">
+        <div class="font-bold text-primary mb-2">UTECH Support Bot</div>
+        <p class="text-sm text-gray-700 mb-4">Hello! I can guide you through building your perfect security package.</p>
+        <button onclick="App.navigateTo('configurator')" class="w-full bg-accent text-white py-2 rounded-lg text-sm hover:bg-blue-600 transition">Start Configurator</button>
+        <div class="text-xs text-center mt-2 text-gray-500 cursor-pointer" onclick="document.getElementById('chatbot-popup').classList.add('hidden')">Close</div>
+    </div>
+
+
+    <script>
+        // --- Core Application State and Setup ---
+        const App = {
+            currentPage: 'home',
+            configState: {
+                step: 1,
+                environment: 'Hotel',
+                useCase: [],
+                components: {}, // { productId: quantity }
+                maintenancePlan: 'Standard',
+            },
+            // Mock product data
+            products: {
+                cctv_dome: { id: 'cctv_dome', name: 'Hotel CCTV Dome 4MP', price: 30, category: 'CCTV' },
+                nvr_8ch: { id: 'nvr_8ch', name: 'NVR 8-Channel', price: 120, category: 'CCTV' },
+                bio_panel: { id: 'bio_panel', name: 'Biometric Access Panel', price: 85, category: 'Access Control' },
+                door_lock: { id: 'door_lock', name: 'Smart Door Lock (RFID)', price: 60, category: 'Access Control' },
+                fire_sensor: { id: 'fire_sensor', name: 'Smoke & Fire Combo Sensor', price: 45, category: 'Fire Safety' },
+                smart_hub: { id: 'smart_hub', name: 'Smart Hub (Controller)', price: 70, category: 'Hotel Automation' },
+            },
+            // Mock lead data for Admin Dashboard
+            mockLeads: [
+                { id: '12345', name: 'Abdullah Al Balushi', company: 'Muscat Hotel LLC', email: 'abdullah@muscathotel.com', phoneVerified: true, interest: 'Full Package', status: 'New', score: 0 },
+                { id: '12346', name: 'Jane Doe', company: 'Salty Seas Motel', email: 'jane@saltyseas.net', phoneVerified: false, interest: 'Access Control', status: 'Quoted', score: 0 },
+                { id: '12347', name: 'Khalid A.', company: 'Khalid Apartments', email: 'khalid@gmail.com', phoneVerified: true, interest: 'CCTV', status: 'Converted', score: 0 },
+            ],
+            maintenancePlans: {
+                None: { name: 'None', price: 0, multiplier: 0 },
+                Basic: { name: 'Basic', price: 20, multiplier: 1 },
+                Standard: { name: 'Standard', price: 45, multiplier: 1 },
+                Premium: { name: 'Premium', price: 90, multiplier: 1 },
+            }
+        };
+
+        // Utility to generate Lucide icons
+        const icon = (name, classes = 'w-5 h-5') => `<i data-lucide="${name}" class="${classes}"></i>`;
+
+        // --- Pricing and Discount Logic ---
+
+        App.calculateLeadScore = (lead) => {
+            let score = 0;
+            // Business email check (simple domain check for simulation)
+            if (lead.email && lead.email.includes('@') && !lead.email.endsWith('@gmail.com') && !lead.email.endsWith('@hotmail.com')) {
+                score += 2; // Business email +2
+            }
+            if (lead.phoneVerified) {
+                score += 1; // Verified phone +1
+            }
+            if (lead.company && lead.company.length > 5 && lead.company !== 'N/A') {
+                score += 1; // Company name +1
+            }
+            return score;
+        };
+
+        App.calculateQuoteSummary = () => {
+            let itemTotal = 0;
+            let totalItems = 0;
+
+            for (const productId in App.configState.components) {
+                const quantity = App.configState.components[productId];
+                const product = App.products[productId];
+                if (product) {
+                    itemTotal += product.price * quantity;
+                    totalItems += quantity;
+                }
+            }
+
+            let bundleDiscount = 0;
+            let discountRate = 0;
+            if (totalItems > 10) {
+                discountRate = 0.12; // 12% >10 items
+            } else if (totalItems > 5) {
+                discountRate = 0.08; // 8% >5 items
+            }
+
+            bundleDiscount = itemTotal * discountRate;
+            let subtotal = itemTotal - bundleDiscount;
+
+            // Simple calculation for simulation
+            const deliveryFee = 50;
+            const installationFee = Math.min(Math.max(totalItems * 20, 150), 5000); // Min 150, Max 5000 OMR
+
+            const totalExclMaintenance = subtotal + deliveryFee + installationFee;
+
+            const maintenancePlan = App.maintenancePlans[App.configState.maintenancePlan];
+            const maintenanceCost = totalItems * maintenancePlan.price;
+
+
+            return {
+                itemTotal,
+                totalItems,
+                discountRate: (discountRate * 100).toFixed(0),
+                bundleDiscount,
+                subtotal,
+                deliveryFee,
+                installationFee,
+                maintenanceCost,
+                totalExclMaintenance,
+            };
+        };
+
+        // --- UI Rendering Functions ---
+
+        App.renderHeader = () => {
+            const container = document.getElementById('app-container');
+            if (!container) return;
+
+            const headerHTML = `
+                <header class="bg-white shadow-md sticky top-0 z-30">
+                    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+                        <!-- Logo -->
+                        <div class="flex items-center space-x-2 cursor-pointer" onclick="App.navigateTo('home')">
+                            <i data-lucide="shield-check" class="w-6 h-6 text-primary"></i>
+                            <span class="text-xl font-bold text-gray-800">UTECH Oman</span>
+                        </div>
+
+                        <!-- Navigation/Icons -->
+                        <div class="flex items-center space-x-4">
+                            <a href="#" class="text-gray-600 hover:text-primary transition hidden sm:block">
+                                ${icon('search')}
+                            </a>
+                            <a href="#" class="text-gray-600 hover:text-primary transition hidden sm:block">
+                                ${icon('phone')}
+                            </a>
+                            <a href="#" onclick="App.navigateTo('admin')" class="text-gray-600 hover:text-primary transition">
+                                ${icon('layout-dashboard')}
+                            </a>
+                            <a href="#" class="text-gray-600 hover:text-primary transition">
+                                ${icon('shopping-cart')}
+                            </a>
+                        </div>
+                    </div>
+                </header>
+            `;
+            container.insertAdjacentHTML('afterbegin', headerHTML);
+            lucide.createIcons(); // Initialize icons
+        };
+
+        App.renderHomePage = () => {
+            const services = [
+                { icon: 'package', title: 'Delivery', desc: 'Fast, secure shipping across Oman.' },
+                { icon: 'tools', title: 'Installation', desc: 'Certified technician setup.' },
+                { icon: 'settings', title: 'Maintenance', desc: 'Proactive system monitoring.' },
+                { icon: 'calendar', title: 'AMC', desc: 'Annual Maintenance Contracts.' },
+            ];
+
+            return `
+                <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <!-- Hero Section -->
+                    <div class="bg-primary text-white rounded-xl shadow-lg p-8 md:p-16 mb-12 relative overflow-hidden">
+                        <!-- Simulated Carousel Content -->
+                        <h1 class="text-4xl md:text-6xl font-extrabold mb-4 leading-tight">Smart Hotel Security Solutions</h1>
+                        <p class="text-xl mb-8 opacity-90">Design your integrated access control, surveillance, and fire safety systems easily.</p>
+                        <button onclick="App.navigateTo('configurator')" class="bg-white text-primary px-8 py-3 rounded-full text-lg font-semibold shadow-xl hover:bg-gray-100 transition duration-300">
+                            Build Your Package
+                        </button>
+                        <!-- Abstract background element -->
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-white bg-opacity-10 transform rotate-45 translate-x-1/2 -translate-y-1/2 rounded-full"></div>
+                    </div>
+
+                    <!-- Category Chips -->
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">Explore Categories</h2>
+                    <div class="flex space-x-3 overflow-x-scroll category-chips pb-4 mb-12">
+                        ${['Hotel Automation', 'Smart Home', 'CCTV', 'Access Control', 'Fire Safety', 'Accessories', 'Services'].map(cat => `
+                            <button onclick="App.navigateTo('products', { category: '${cat}' })" class="flex-shrink-0 px-4 py-2 bg-white border border-primary text-primary rounded-full font-medium text-sm shadow-sm hover:bg-primary hover:text-white transition duration-200">
+                                ${cat}
+                            </button>
+                        `).join('')}
+                    </div>
+
+                    <!-- Featured Products -->
+                    <h2 class="text-2xl font-bold text-gray-800 mb-6">Featured Bundles & Trending</h2>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+                        ${Object.values(App.products).slice(0, 3).map(p => `
+                            <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-100 hover:shadow-xl transition duration-300">
+                                <div class="h-32 bg-gray-100 rounded-lg mb-4 flex items-center justify-center">
+                                    <i data-lucide="${p.category.includes('CCTV') ? 'video' : p.category.includes('Access') ? 'lock' : 'fire-extinguisher'}" class="w-10 h-10 text-primary/50"></i>
+                                </div>
+                                <h3 class="text-lg font-semibold text-gray-800">${p.name}</h3>
+                                <p class="text-sm text-gray-500 mb-4">${p.category} | From OMR ${p.price}</p>
+                                <div class="flex justify-between items-center">
+                                    <button onclick="App.addToConfigurator('${p.id}')" class="text-primary hover:text-primary-dark transition text-sm font-medium flex items-center">
+                                        ${icon('package', 'w-4 h-4 mr-1')} Add to Bundle
+                                    </button>
+                                    <button class="bg-primary text-white text-xs px-3 py-1 rounded-full hover:bg-primary-dark transition">
+                                        Request Quote
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <!-- Quick Services Row -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 bg-white rounded-xl shadow-lg border border-gray-100">
+                        ${services.map(s => `
+                            <div class="text-center p-3">
+                                <i data-lucide="${s.icon}" class="w-8 h-8 text-accent mx-auto mb-2"></i>
+                                <h4 class="font-semibold text-gray-800">${s.title}</h4>
+                                <p class="text-xs text-gray-500 hidden sm:block">${s.desc}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                </main>
+            `;
+        };
+
+        App.renderProductListing = (params = {}) => {
+            const filteredProducts = params.category ?
+                Object.values(App.products).filter(p => p.category === params.category) :
+                Object.values(App.products);
+
+            return `
+                <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <h1 class="text-3xl font-bold text-gray-800 mb-6">${params.category || 'All'} Security Products</h1>
+                    <div class="flex mb-6 space-x-4">
+                        <button class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm">${icon('filter', 'w-4 h-4 mr-1')} Filter by Brand</button>
+                        <button class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm">Sort by Price</button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                        ${filteredProducts.map(p => `
+                            <div class="bg-white rounded-xl shadow p-5 border border-gray-100">
+                                <div class="h-40 bg-gray-50 rounded-lg mb-4 flex items-center justify-center">
+                                    <i data-lucide="${p.category.includes('CCTV') ? 'video' : p.category.includes('Access') ? 'lock' : 'fire-extinguisher'}" class="w-12 h-12 text-gray-300"></i>
+                                </div>
+                                <h3 class="text-lg font-semibold text-gray-800 truncate">${p.name}</h3>
+                                <p class="text-primary font-bold text-xl my-2">OMR ${p.price}</p>
+                                <p class="text-xs text-gray-500 mb-4">${p.category}</p>
+                                <div class="flex space-x-2">
+                                    <button onclick="App.addToConfigurator('${p.id}')" class="flex-1 bg-primary text-white py-2 rounded-lg text-sm hover:bg-primary-dark transition">
+                                        Add to Bundle
+                                    </button>
+                                    <button onclick="App.showLeadForm({ prefillProduct: '${p.name}' })" class="flex-1 border border-primary text-primary py-2 rounded-lg text-sm hover:bg-primary/10 transition">
+                                        Request Quote
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </main>
+            `;
+        };
+
+        App.renderAdminDashboard = () => {
+            // Calculate scores before rendering
+            App.mockLeads.forEach(lead => {
+                lead.score = App.calculateLeadScore(lead);
+            });
+
+            const summary = {
+                New: App.mockLeads.filter(l => l.status === 'New').length,
+                Verified: App.mockLeads.filter(l => l.status === 'Verified').length,
+                Quoted: App.mockLeads.filter(l => l.status === 'Quoted').length,
+                Converted: App.mockLeads.filter(l => l.status === 'Converted').length,
+            };
+
+            const leadsHTML = App.mockLeads.map(lead => {
+                const isHighPriority = lead.score >= 3;
+                const statusColor = lead.status === 'Converted' ? 'bg-green-100 text-green-700' :
+                                    lead.status === 'Quoted' ? 'bg-blue-100 text-blue-700' :
+                                    lead.status === 'Verified' ? 'bg-yellow-100 text-yellow-700' :
+                                    'bg-gray-100 text-gray-700';
+
+                return `
+                    <tr class="border-b hover:bg-gray-50 transition duration-150">
+                        <td class="p-4 text-sm font-medium text-gray-900">${lead.id}</td>
+                        <td class="p-4 text-sm text-gray-600">${lead.name} (${lead.company})</td>
+                        <td class="p-4 text-sm text-gray-600">${lead.interest}</td>
+                        <td class="p-4 text-sm">
+                            <span class="px-2 py-1 rounded-full text-xs font-semibold ${statusColor}">
+                                ${lead.status}
+                            </span>
+                        </td>
+                        <td class="p-4 text-sm">
+                            <span class="px-2 py-1 rounded-full text-xs font-semibold ${isHighPriority ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}">
+                                Score: ${lead.score} / ${isHighPriority ? 'High Priority' : 'Low Priority / Nurture'}
+                            </span>
+                        </td>
+                        <td class="p-4 text-sm">
+                            <div class="flex space-x-2">
+                                ${lead.status === 'New' ? `<button onclick="App.updateLeadStatus('${lead.id}', 'Verified')" class="text-xs bg-yellow-500 text-white px-3 py-1 rounded-lg hover:bg-yellow-600 transition">Mark Verified</button>` : ''}
+                                ${lead.status === 'Verified' ? `<button onclick="App.updateLeadStatus('${lead.id}', 'Quoted')" class="text-xs bg-blue-500 text-white px-3 py-1 rounded-lg hover:bg-blue-600 transition">Send Quote</button>` : ''}
+                                ${lead.status === 'Quoted' ? `<button onclick="App.updateLeadStatus('${lead.id}', 'Converted')" class="text-xs bg-green-500 text-white px-3 py-1 rounded-lg hover:bg-green-600 transition">Mark Converted</button>` : ''}
+                                ${lead.status === 'Converted' ? `<button onclick="App.updateLeadStatus('${lead.id}', 'Completed')" class="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-primary-dark transition">Installation Complete</button>` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <h1 class="text-3xl font-bold text-primary mb-6">Admin Lead Dashboard</h1>
+                    <p class="text-sm text-gray-600 mb-6">Simulated CRM view for UTECH sales and service teams. Lead scoring and automation triggers shown below.</p>
+
+                    <!-- Summary Counters -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+                        ${Object.keys(summary).map(key => `
+                            <div class="bg-white p-5 rounded-xl shadow border-l-4 border-primary">
+                                <p class="text-sm font-medium text-gray-500">${key.toUpperCase()}</p>
+                                <p class="text-3xl font-bold text-gray-900">${summary[key]}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <!-- Lead Table -->
+                    <div class="bg-white rounded-xl shadow overflow-hidden">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="p-4 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                                    <th class="p-4 text-left text-xs font-medium text-gray-500 uppercase">Contact / Company</th>
+                                    <th class="p-4 text-left text-xs font-medium text-gray-500 uppercase">Interest</th>
+                                    <th class="p-4 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                    <th class="p-4 text-left text-xs font-medium text-gray-500 uppercase">Score / Priority</th>
+                                    <th class="p-4 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${leadsHTML}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Integration Annotation -->
+                    <div class="mt-8 p-4 bg-gray-100 border border-gray-200 rounded-lg text-sm text-gray-700">
+                        <h3 class="font-bold text-gray-800 mb-2">${icon('zap', 'w-4 h-4 inline mr-1 text-accent')} Automated Workflow Simulation</h3>
+                        <ul class="list-disc list-inside space-y-1">
+                            <li><span class="font-medium">Lead Capture Webhook:</span> All form submissions trigger a POST to <code>https://example.com/webhook/lead-form</code>.</li>
+                            <li><span class="font-medium">n8n Automation:</span> Webhook &rarr; Create Lead in CRM/Sheet &rarr; Auto Acknowledgement Email.</li>
+                            <li><span class="font-medium">Post-Install Automation:</span> 'Installation Complete' status triggers automated 5-star rating form email.</li>
+                        </ul>
+                    </div>
+                </main>
+            `;
+        };
+
+        // --- Configurator Rendering and Logic ---
+
+        App.renderConfigurator = () => {
+            const summary = App.calculateQuoteSummary();
+
+            const steps = [
+                { id: 1, title: 'Choose Environment', content: App.renderStep1() },
+                { id: 2, title: 'Select Use Cases', content: App.renderStep2() },
+                { id: 3, title: 'Configure Components', content: App.renderStep3() },
+                { id: 4, title: 'Choose Maintenance', content: App.renderStep4() },
+            ];
+
+            const currentStep = steps.find(s => s.id === App.configState.step);
+
+            const progressBarHTML = steps.map(s => `
+                <div class="flex-1">
+                    <div class="text-center">
+                        <div class="w-8 h-8 mx-auto rounded-full flex items-center justify-center font-bold text-sm ${s.id === App.configState.step ? 'bg-accent text-white' : s.id < App.configState.step ? 'bg-primary text-white' : 'bg-gray-200 text-gray-600'}">
+                            ${s.id < App.configState.step ? icon('check', 'w-4 h-4') : s.id}
+                        </div>
+                        <p class="text-xs mt-2 ${s.id === App.configState.step ? 'text-accent font-semibold' : 'text-gray-600'}">${s.title}</p>
+                    </div>
+                </div>
+                ${s.id < steps.length ? '<div class="flex-1 border-t-2 mt-4 border-dashed border-gray-300"></div>' : ''}
+            `).join('');
+
+            return `
+                <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                    <h1 class="text-3xl font-bold text-gray-800 mb-8">Build Your Custom Security Package</h1>
+
+                    <div class="flex items-center justify-between mb-8">${progressBarHTML}</div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <!-- Left Column: Step Content -->
+                        <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg">
+                            <h2 class="text-2xl font-bold text-gray-800 mb-4">Step ${currentStep.id}: ${currentStep.title}</h2>
+                            <div id="step-content">
+                                ${currentStep.content}
+                            </div>
+                            <div class="flex justify-between mt-8 pt-4 border-t border-gray-100">
+                                <button onclick="App.prevStep()" ${App.configState.step === 1 ? 'disabled' : ''} class="bg-gray-300 text-gray-800 px-6 py-2 rounded-lg font-semibold disabled:opacity-50 transition">
+                                    ${icon('arrow-left', 'w-4 h-4 inline mr-1')} Previous
+                                </button>
+                                <button onclick="App.nextStep()" ${App.configState.step === steps.length ? 'disabled' : ''} class="bg-primary text-white px-6 py-2 rounded-lg font-semibold hover:bg-primary-dark disabled:opacity-50 transition">
+                                    Next Step ${icon('arrow-right', 'w-4 h-4 inline ml-1')}
+                                </button>
+                                ${App.configState.step === steps.length ? `
+                                    <button onclick="App.showLeadForm({ prefillConfig: true })" class="bg-accent text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-600 transition">
+                                        Request Quote
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </div>
+
+                        <!-- Right Column: Live Summary -->
+                        <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg sticky top-24 h-fit">
+                            <h2 class="text-xl font-bold text-primary mb-4">Live Quote Summary</h2>
+
+                            <div class="space-y-2 border-b pb-4 mb-4">
+                                <div class="flex justify-between text-sm text-gray-700">
+                                    <span>Items Total (${summary.totalItems} units)</span>
+                                    <span>OMR ${summary.itemTotal.toFixed(2)}</span>
+                                </div>
+                                <div class="flex justify-between text-sm text-green-600 font-semibold">
+                                    <span>Bundle Discount (${summary.discountRate}%)</span>
+                                    <span>- OMR ${summary.bundleDiscount.toFixed(2)}</span>
+                                </div>
+                                <div class="flex justify-between text-base font-bold text-gray-800 pt-2">
+                                    <span>Subtotal</span>
+                                    <span>OMR ${summary.subtotal.toFixed(2)}</span>
+                                </div>
+                            </div>
+
+                            <div class="space-y-2 border-b pb-4 mb-4">
+                                <div class="flex justify-between text-sm text-gray-700">
+                                    <span>Delivery Fee</span>
+                                    <span>+ OMR ${summary.deliveryFee.toFixed(2)}</span>
+                                </div>
+                                <div class="flex justify-between text-sm text-gray-700">
+                                    <span>Installation (Estimate)</span>
+                                    <span>+ OMR ${summary.installationFee.toFixed(2)}</span>
+                                </div>
+                                <div class="flex justify-between text-sm text-gray-700 font-medium">
+                                    <span>Maintenance (${App.configState.maintenancePlan})</span>
+                                    <span>OMR ${summary.maintenanceCost.toFixed(2)} / Year</span>
+                                </div>
+                            </div>
+
+                            <div class="flex justify-between text-2xl font-extrabold text-primary pt-2">
+                                <span>TOTAL (EXCL. AMC)</span>
+                                <span>OMR ${summary.totalExclMaintenance.toFixed(2)}</span>
+                            </div>
+
+                            <button onclick="App.showLeadForm({ prefillConfig: true })" class="w-full bg-accent text-white py-3 rounded-lg text-lg font-semibold mt-6 hover:bg-blue-600 transition">
+                                Request Quote
+                            </button>
+                            <button onclick="App.showToast('Simulated PDF Download Started...')" class="w-full border border-gray-300 text-gray-700 py-3 rounded-lg text-sm mt-3 hover:bg-gray-50 transition">
+                                ${icon('file-text', 'w-4 h-4 inline mr-1')} Download Quote (PDF Mock)
+                            </button>
+                        </div>
+                    </div>
+                </main>
+            `;
+        };
+
+        App.renderStep1 = () => {
+            const environments = ['Hotel', 'House', 'Business'];
+            return `
+                <div class="space-y-4">
+                    <p class="text-gray-600">Select the type of environment for this security package.</p>
+                    ${environments.map(env => `
+                        <label class="flex items-center bg-gray-50 p-4 rounded-lg cursor-pointer border ${App.configState.environment === env ? 'border-primary ring-2 ring-primary/50' : 'border-gray-200'}">
+                            <input type="radio" name="environment" value="${env}" onchange="App.handleConfigUpdate('environment', this.value)" ${App.configState.environment === env ? 'checked' : ''} class="text-primary focus:ring-primary h-4 w-4">
+                            <span class="ml-3 font-medium text-gray-800">${env}</span>
+                            <span class="ml-auto text-sm text-gray-500">${env === 'Hotel' ? 'B2B/Commercial' : 'Residential/Small Scale'}</span>
+                        </label>
+                    `).join('')}
+                </div>
+            `;
+        };
+
+        App.renderStep2 = () => {
+            const useCases = ['Surveillance (CCTV)', 'Access Control', 'Fire Safety', 'Full Package'];
+            return `
+                <div class="space-y-4">
+                    <p class="text-gray-600">What is the primary function of your security system?</p>
+                    ${useCases.map(uc => `
+                        <label class="flex items-center bg-gray-50 p-4 rounded-lg cursor-pointer border ${App.configState.useCase.includes(uc) ? 'border-primary ring-2 ring-primary/50' : 'border-gray-200'}">
+                            <input type="checkbox" name="useCase" value="${uc}" onchange="App.handleConfigUpdate('useCase', this.value, true)" ${App.configState.useCase.includes(uc) ? 'checked' : ''} class="text-primary focus:ring-primary h-4 w-4 rounded">
+                            <span class="ml-3 font-medium text-gray-800">${uc}</span>
+                        </label>
+                    `).join('')}
+                </div>
+            `;
+        };
+
+        App.renderStep3 = () => {
+            // Filter products based on selected use cases (simplification for prototype)
+            let relevantCategories = [];
+            if (App.configState.useCase.includes('Surveillance (CCTV)') || App.configState.useCase.includes('Full Package')) relevantCategories.push('CCTV');
+            if (App.configState.useCase.includes('Access Control') || App.configState.useCase.includes('Full Package')) relevantCategories.push('Access Control', 'Hotel Automation');
+            if (App.configState.useCase.includes('Fire Safety') || App.configState.useCase.includes('Full Package')) relevantCategories.push('Fire Safety');
+
+            const filteredProducts = Object.values(App.products).filter(p => relevantCategories.includes(p.category));
+
+            if (filteredProducts.length === 0) {
+                return '<p class="text-red-500">Please select at least one use case in Step 2 to configure components.</p>';
+            }
+
+            return `
+                <div class="space-y-4">
+                    <p class="text-gray-600 mb-4">Specify the quantity for each required component:</p>
+                    ${filteredProducts.map(p => {
+                        const quantity = App.configState.components[p.id] || 0;
+                        return `
+                            <div class="flex items-center bg-gray-50 p-3 rounded-lg border border-gray-200">
+                                <span class="flex-1 font-medium text-gray-800">${p.name}</span>
+                                <span class="text-sm text-gray-500 w-24 text-center">OMR ${p.price}</span>
+                                <div class="flex items-center ml-4 space-x-2">
+                                    <button onclick="App.updateComponentQuantity('${p.id}', -1)" class="bg-white text-gray-700 border border-gray-300 w-8 h-8 rounded-full hover:bg-gray-100 transition disabled:opacity-50" ${quantity === 0 ? 'disabled' : ''}>-</button>
+                                    <input type="number" id="qty-${p.id}" value="${quantity}" min="0" onchange="App.updateComponentQuantity('${p.id}', 0, this.value)" class="w-12 text-center border border-gray-300 rounded-lg text-sm p-1">
+                                    <button onclick="App.updateComponentQuantity('${p.id}', 1)" class="bg-white text-gray-700 border border-gray-300 w-8 h-8 rounded-full hover:bg-gray-100 transition">+</button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                    <p class="text-xs text-gray-500 mt-4">*Discounts applied automatically for 5+ and 10+ items.</p>
+                </div>
+            `;
+        };
+
+        App.renderStep4 = () => {
+            const planDetails = Object.values(App.maintenancePlans).map(p => ({
+                ...p,
+                desc: p.name === 'Basic' ? 'Annual check-up, remote support.' :
+                      p.name === 'Standard' ? 'Twice yearly check, 48hr response time.' :
+                      p.name === 'Premium' ? 'Quarterly check, 4hr emergency response, 24/7 support.' : 'No plan selected. Support on demand.',
+                yearlyCostPerUnit: p.price
+            }));
+
+            return `
+                <div class="space-y-4">
+                    <p class="text-gray-600">Select an optional Annual Maintenance Contract (AMC) plan:</p>
+                    ${planDetails.map(plan => `
+                        <label class="block bg-white p-4 rounded-lg border cursor-pointer transition duration-200 ${App.configState.maintenancePlan === plan.name ? 'border-primary ring-2 ring-primary/50 shadow-md' : 'border-gray-200 hover:border-gray-300'}">
+                            <div class="flex justify-between items-center">
+                                <div class="flex items-center">
+                                    <input type="radio" name="maintenancePlan" value="${plan.name}" onchange="App.handleConfigUpdate('maintenancePlan', this.value)" ${App.configState.maintenancePlan === plan.name ? 'checked' : ''} class="text-primary focus:ring-primary h-4 w-4">
+                                    <span class="ml-3 font-bold text-gray-800">${plan.name}</span>
+                                </div>
+                                <span class="font-bold text-lg text-primary">OMR ${plan.yearlyCostPerUnit} / Unit / Yr</span>
+                            </div>
+                            <p class="text-sm text-gray-500 mt-1 ml-6">${plan.desc}</p>
+                        </label>
+                    `).join('')}
+                </div>
+            `;
+        };
+
+        // --- Event Handlers and State Updaters ---
+
+        App.navigateTo = (page, params = {}) => {
+            App.currentPage = page;
+            App.renderApp(params);
+        };
+
+        App.nextStep = () => {
+            if (App.configState.step < 4) {
+                App.configState.step++;
+                App.navigateTo('configurator');
+            }
+        };
+
+        App.prevStep = () => {
+            if (App.configState.step > 1) {
+                App.configState.step--;
+                App.navigateTo('configurator');
+            }
+        };
+
+        App.handleConfigUpdate = (key, value, isCheckbox = false) => {
+            if (isCheckbox) {
+                let current = App.configState[key];
+                if (current.includes(value)) {
+                    App.configState[key] = current.filter(item => item !== value);
+                } else {
+                    App.configState[key].push(value);
+                }
+            } else {
+                App.configState[key] = value;
+            }
+            App.navigateTo('configurator');
+        };
+
+        App.updateComponentQuantity = (productId, change = 0, setValue = null) => {
+            let quantity = App.configState.components[productId] || 0;
+
+            if (setValue !== null) {
+                quantity = parseInt(setValue) || 0;
+            } else {
+                quantity += change;
+            }
+
+            quantity = Math.max(0, quantity);
+
+            if (quantity > 0) {
+                App.configState.components[productId] = quantity;
+            } else {
+                delete App.configState.components[productId];
+            }
+
+            App.navigateTo('configurator');
+        };
+
+        App.addToConfigurator = (productId) => {
+            App.configState.components[productId] = (App.configState.components[productId] || 0) + 1;
+            App.navigateTo('configurator');
+            App.showToast(`1x ${App.products[productId].name} added to your bundle.`);
+        };
+
+        App.updateLeadStatus = (leadId, newStatus) => {
+            const leadIndex = App.mockLeads.findIndex(l => l.id === leadId);
+            if (leadIndex !== -1) {
+                const oldStatus = App.mockLeads[leadIndex].status;
+                App.mockLeads[leadIndex].status = newStatus;
+                
+                let toastMessage = `Lead #${leadId} status changed from ${oldStatus} to ${newStatus}.`;
+                
+                if (newStatus === 'Verified') {
+                    toastMessage = `Lead #${leadId} verified. Ready for quotation.`;
+                } else if (newStatus === 'Quoted') {
+                    toastMessage = `Quote Sent for #${leadId}. Automation: 24hr follow-up reminder set.`;
+                } else if (newStatus === 'Completed') {
+                    toastMessage = `Installation Complete for #${leadId}. Automation: Rating form email triggered.`;
+                }
+                
+                App.showToast(toastMessage, 'success');
+                App.navigateTo('admin');
+            }
+        };
+        
+        // --- Lead Capture Simulation (Modals/Forms/Toasts) ---
+
+        App.showToast = (message, type = 'info') => {
+            const container = document.getElementById('toast-container');
+            const color = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-gray-800';
+            const iconName = type === 'success' ? 'check-circle' : 'info';
+            const toastId = 'toast-' + Date.now();
+
+            const toastHTML = `
+                <div id="${toastId}" class="${color} text-white p-4 rounded-lg shadow-xl flex items-center transition-all duration-300 transform translate-x-full opacity-0">
+                    <i data-lucide="${iconName}" class="w-5 h-5 mr-2"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            container.insertAdjacentHTML('beforeend', toastHTML);
+            lucide.createIcons();
+            
+            const toastElement = document.getElementById(toastId);
+            setTimeout(() => {
+                toastElement.classList.remove('translate-x-full', 'opacity-0');
+                toastElement.classList.add('translate-x-0', 'opacity-100');
+            }, 10); // Start transition
+
+            setTimeout(() => {
+                toastElement.classList.remove('translate-x-0', 'opacity-100');
+                toastElement.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => {
+                    toastElement.remove();
+                }, 300);
+            }, 4000);
+        };
+
+        App.showLeadForm = (options = {}) => {
+            const modal = document.getElementById('lead-form-modal');
+            modal.innerHTML = `
+                <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-lg">
+                    <h3 class="text-2xl font-bold text-primary mb-4">Request Your Custom Quote</h3>
+                    <p class="text-gray-600 mb-6">Enter your details and our team will prepare your full, accurate quotation.</p>
+                    
+                    <form onsubmit="App.handleLeadSubmission(event, ${JSON.stringify(options)})">
+                        <input type="text" id="lead_name" placeholder="Full Name" required class="w-full mb-4 p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                        <input type="text" id="lead_business" placeholder="Business Name (e.g., Grand Hyatt Muscat)" required class="w-full mb-4 p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                        <input type="email" id="lead_email" placeholder="Business Email" required class="w-full mb-4 p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                        <input type="tel" id="lead_phone" placeholder="Phone Number" required class="w-full mb-4 p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                        <input type="text" id="lead_city" placeholder="City / Area" required class="w-full mb-6 p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                        
+                        <div class="flex justify-between">
+                            <button type="button" onclick="App.hideModal('lead-form-modal')" class="text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition">Cancel</button>
+                            <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg font-semibold hover:bg-primary-dark transition">Submit & Verify</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            // Prefill product interest if provided
+            if (options.prefillProduct) {
+                modal.querySelector('h3').textContent = `Request Quote for: ${options.prefillProduct}`;
+            }
+        };
+
+        App.handleLeadSubmission = (event, options) => {
+            event.preventDefault();
+            
+            const leadData = {
+                name: document.getElementById('lead_name').value,
+                company: document.getElementById('lead_business').value,
+                email: document.getElementById('lead_email').value,
+                phone: document.getElementById('lead_phone').value,
+                city: document.getElementById('lead_city').value,
+                interest: options.prefillConfig ? 'Full Package (Configurator)' : `Specific Product (${options.prefillProduct})`,
+            };
+
+            // Hide form modal and show OTP modal
+            App.hideModal('lead-form-modal');
+            App.showOtpModal(leadData);
+        };
+
+        App.showOtpModal = (leadData) => {
+            const modal = document.getElementById('otp-modal');
+            modal.innerHTML = `
+                <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-sm text-center">
+                    <i data-lucide="mail-check" class="w-12 h-12 text-primary mx-auto mb-4"></i>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Verify Your Email</h3>
+                    <p class="text-gray-600 mb-6">A 4-digit verification code has been sent to ${leadData.email}.</p>
+                    
+                    <form onsubmit="App.handleOtpVerification(event, ${JSON.stringify(leadData)})">
+                        <input type="text" id="otp_code" placeholder="Enter Code (e.g., 1234)" pattern="[0-9]{4}" maxlength="4" required class="w-full mb-6 p-3 text-center text-xl tracking-widest border border-gray-300 rounded-lg focus:ring-primary focus:border-primary">
+                        
+                        <div class="flex justify-center">
+                            <button type="submit" class="bg-accent text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-600 transition">Verify Code</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
+        };
+
+        App.handleOtpVerification = (event, leadData) => {
+            event.preventDefault();
+            const otpCode = document.getElementById('otp_code').value;
+            
+            // --- SIMULATION SUCCESS ---
+            if (otpCode === '1234') { // Mock OTP check
+                App.hideModal('otp-modal');
+                const newLeadId = (Math.floor(Math.random() * 90000) + 10000).toString();
+                
+                // Add lead to mock CRM
+                App.mockLeads.unshift({
+                    id: newLeadId,
+                    name: leadData.name,
+                    company: leadData.company,
+                    email: leadData.email,
+                    phoneVerified: true,
+                    interest: leadData.interest,
+                    status: 'New',
+                    score: 0,
+                });
+                
+                // Show final success message and trigger automation simulation
+                document.getElementById('app-content').innerHTML = `
+                    <div class="max-w-xl mx-auto py-20 text-center">
+                        <i data-lucide="rocket" class="w-16 h-16 text-primary mx-auto mb-4"></i>
+                        <h1 class="text-3xl font-bold text-gray-800 mb-4">Request Submitted Successfully!</h1>
+                        <p class="text-xl text-primary font-semibold mb-6">Lead ID: #${newLeadId}</p>
+                        <p class="text-gray-600 mb-8">
+                            Thank you, ${leadData.name}. Your request for 
+                            <span class="font-medium">${leadData.interest}</span> has been received. 
+                            A UTECH representative will contact you within 24 hours.
+                        </p>
+                        <button onclick="App.navigateTo('home')" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary-dark transition">Return to Home</button>
+                    </div>
+                `;
+                
+                // Toast for automation flow
+                App.showToast(`Lead captured #${newLeadId} &rarr; Webhook POSTED &rarr; CRM Logged &rarr; Auto Acknowledgement Sent.`, 'success');
+                lucide.createIcons();
+                
+            } else {
+                // Mock failure
+                App.showToast('Verification code is incorrect. Please try 1234.', 'error');
+            }
+        };
+        
+        App.hideModal = (id) => {
+            document.getElementById(id).classList.remove('flex');
+            document.getElementById(id).classList.add('hidden');
+        };
+
+        // --- Main Rendering Loop ---
+        App.renderApp = (params) => {
+            const container = document.getElementById('app-container');
+            let contentHTML = '';
+
+            // Render content based on current page
+            switch (App.currentPage) {
+                case 'home':
+                    contentHTML = App.renderHomePage();
+                    break;
+                case 'products':
+                    contentHTML = App.renderProductListing(params);
+                    break;
+                case 'configurator':
+                    contentHTML = App.renderConfigurator();
+                    break;
+                case 'admin':
+                    contentHTML = App.renderAdminDashboard();
+                    break;
+                default:
+                    contentHTML = App.renderHomePage();
+            }
+
+            // Update main container content (preserving header)
+            if (container.children.length === 0) {
+                App.renderHeader();
+                container.innerHTML += `<div id="app-content">${contentHTML}</div>`;
+            } else {
+                document.getElementById('app-content').innerHTML = contentHTML;
+            }
+
+            // Re-render icons after content update
+            lucide.createIcons();
+            // Re-enable chat bot icon
+            document.getElementById('chatbot-icon').onclick = () => {
+                document.getElementById('chatbot-popup').classList.toggle('hidden');
+            };
+        };
+
+        // Initialize App on window load
+        window.onload = () => {
+            App.navigateTo('home');
+        };
+    </script>
+</body>
+</html>
